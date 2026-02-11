@@ -6,18 +6,24 @@ This repository contains the implementation for Assignment 1, including a WebSoc
 
 ```
 /
-??? server/              # Spring Boot WebSocket server implementation
-?   ??? README.md       # Server deployment and running instructions
-?   ??? src/            # Source code
-??? client-part1/        # Basic load testing client
-?   ??? src/            # Source code
-?   ??? client.properties  # Configuration file
-??? client-part2/        # Client with performance analysis
-?   ??? src/            # Source code
-?   ??? client.properties  # Configuration file
-??? results/            # Test results and analysis
-?   ??? README.md       # Results documentation
-??? DesignDocument.md   # Architecture and design document (2 pages max)
+|-- server/                    # Spring Boot WebSocket server implementation
+|   |-- README.md             # Server deployment and running instructions
+|   `-- src/                  # Source code
+|-- client/
+|   |-- client_part1/         # Basic load testing client
+|   |   |-- README.md         # Client Part 1 instructions
+|   |   |-- src/              # Source code
+|   |   `-- src/main/resources/client.properties  # Configuration file
+|   `-- client_part2/         # Client with performance analysis
+|       |-- README.md         # Client Part 2 instructions
+|       |-- src/              # Source code
+|       `-- src/main/resources/client.properties  # Configuration file
+|-- results/                  # Test results and analysis
+|   |-- README.md             # Results documentation
+|   |-- throughput_over_time.csv  # Throughput data (10-second buckets)
+|   `-- generate_throughput_chart.py  # Chart generation script
+|-- README.md                 # Main repository README (this file)
+`-- DesignDocument.md         # Architecture and design document (2 pages max)
 ```
 
 ## Quick Start
@@ -40,6 +46,8 @@ mvn clean compile
 mvn exec:java -Dexec.args="http://your-server:8080"
 ```
 
+See `client/client_part1/README.md` for detailed instructions.
+
 ### Client Part 2 (Performance Analysis)
 
 ```bash
@@ -48,7 +56,7 @@ mvn clean compile
 mvn exec:java -Dexec.args="http://your-server:8080"
 ```
 
-See individual README files in each directory for detailed instructions.
+See `client/client_part2/README.md` for detailed instructions.
 
 ## Configuration
 
@@ -60,6 +68,11 @@ See individual README files in each directory for detailed instructions.
 
 Test results, screenshots, and performance analysis charts are stored in the `results/` directory.
 
+See `results/README.md` for information about:
+- Throughput data export
+- Chart generation
+- Performance analysis
+
 ## Design Document
 
 See `DesignDocument.md` for:
@@ -68,3 +81,10 @@ See `DesignDocument.md` for:
 - Threading model
 - WebSocket connection management
 - Little's Law calculations
+
+## Git Repository
+
+Include this repository URL in your submission:
+- Repository structure matches the structure shown above
+- All README files contain clear running instructions
+- Design document is complete and within 2 pages
