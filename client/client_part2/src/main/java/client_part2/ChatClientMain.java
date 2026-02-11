@@ -1,5 +1,7 @@
 package client_part2;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -183,6 +185,11 @@ public class ChatClientMain {
         }
         mainPool.shutdown();
 
+        // Store throughput data points for chart generation (10-second buckets)
+        List<ThroughputDataPoint> throughputData = new ArrayList<>();
+        long mainStartTimeMs = System.currentTimeMillis();
+        long[] lastMessageCount = new long[1]; // Track previous message count for bucket calculation
+        
         ScheduledExecutorService progressScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "progress");
             t.setDaemon(true);
@@ -193,8 +200,18 @@ public class ChatClientMain {
             long ok = mainMetrics.getSuccessCount();
             long fail = mainMetrics.getFailCount();
             long sent = ok + fail;
-            double throughput = mainMetrics.getThroughputPerSecond();
-            System.out.println("[Main] progress: " + sent + " / " + finalTotalMessages + " sent (ok=" + ok + ", fail=" + fail + ") — " + String.format("%.1f", throughput) + " msg/s");
+            double cumulativeThroughput = mainMetrics.getThroughputPerSecond();
+            long elapsedSeconds = (System.currentTimeMillis() - mainStartTimeMs) / 1000;
+            
+            // Calculate throughput for this 10-second bucket (incremental)
+            long messagesInBucket = sent - lastMessageCount[0];
+            double bucketThroughput = messagesInBucket / 10.0; // messages per second in this bucket
+            lastMessageCount[0] = sent;
+            
+            System.out.println("[Main] progress: " + sent + " / " + finalTotalMessages + " sent (ok=" + ok + ", fail=" + fail + ") — " + String.format("%.1f", cumulativeThroughput) + " msg/s (bucket: " + String.format("%.1f", bucketThroughput) + " msg/s)");
+            
+            // Record throughput data point for this 10-second bucket
+            throughputData.add(new ThroughputDataPoint(elapsedSeconds, bucketThroughput));
         }, 10, 10, TimeUnit.SECONDS);
 
         try {
@@ -230,5 +247,44 @@ public class ChatClientMain {
         System.out.println("[Main] Finished.");
         System.out.println();
         mainMetrics.printSummary();
+        
+        // Export throughput data to CSV for chart generation
+        exportThroughputData(throughputData);
+    }
+    
+    private static class ThroughputDataPoint {
+        final long timeSeconds;
+        final double throughputMsgPerSec;
+        
+        ThroughputDataPoint(long timeSeconds, double throughputMsgPerSec) {
+            this.timeSeconds = timeSeconds;
+            this.throughputMsgPerSec = throughputMsgPerSec;
+        }
+    }
+    
+    private static void exportThroughputData(List<ThroughputDataPoint> data) {
+        if (data.isEmpty()) {
+            System.out.println("[Main] No throughput data to export.");
+            return;
+        }
+        try {
+            // Create results directory if it doesn't exist
+            java.io.File resultsDir = new java.io.File("results");
+            if (!resultsDir.exists()) {
+                resultsDir.mkdirs();
+            }
+            
+            String csvFile = "results/throughput_over_time.csv";
+            FileWriter writer = new FileWriter(csvFile);
+            writer.write("Time (seconds),Throughput (msg/s)\n");
+            for (ThroughputDataPoint point : data) {
+                writer.write(point.timeSeconds + "," + String.format("%.2f", point.throughputMsgPerSec) + "\n");
+            }
+            writer.close();
+            System.out.println("[Main] Throughput data exported to: " + csvFile + " (" + data.size() + " data points)");
+        } catch (IOException e) {
+            System.err.println("[Main] Failed to export throughput data: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }
