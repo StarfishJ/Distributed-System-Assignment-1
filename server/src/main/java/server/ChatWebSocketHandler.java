@@ -47,7 +47,6 @@ public class ChatWebSocketHandler implements WebSocketHandler {
 
         return session.receive()
                 .flatMap(msg -> {
-                    // 批处理消息：客户端可能一次发送多条消息（\n 分隔）
                     String payload = msg.getPayloadAsText();
                     String serverTimestamp = Instant.now().toString();
                     StringBuilder batch = new StringBuilder();
@@ -60,9 +59,9 @@ public class ChatWebSocketHandler implements WebSocketHandler {
                         }
                     }
                     if (batch.length() == 0) return Mono.empty();
-                    // 非阻塞发送：WebFlux 的 send 已经是非阻塞的
+                    // WebFlux's send is already non-blocking
                     return session.send(Mono.just(session.textMessage(batch.toString())));
-                }, 512) // 增加 flatMap 并发度：允许同时处理更多消息（默认是 256）
+                }, 512) // increase flatMap concurrency: allow more messages to be processed at once (default is 256)
                 .then();
     }
 
