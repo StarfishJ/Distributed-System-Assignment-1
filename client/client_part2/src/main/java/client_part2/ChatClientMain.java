@@ -170,6 +170,8 @@ public class ChatClientMain {
         // Create one queue per worker thread
         List<BlockingQueue<ClientMessage>> mainQueues = createWorkerQueues(mainThreads(), queueCapacity());
         Metrics mainMetrics = new Metrics();
+        // Initialize async CSV writer for per-message metrics
+        Metrics.initializeCsvWriter();
         Thread generatorMain = new Thread(new MessageGenerator(mainQueues, finalTotalMessages));
         generatorMain.start();
 
@@ -250,6 +252,10 @@ public class ChatClientMain {
         
         // Export throughput data to CSV for chart generation
         exportThroughputData(throughputData);
+        
+        // Shutdown async CSV writer and wait for all data to be written
+        Metrics.shutdownCsvWriter();
+        System.out.println("[Main] Per-message metrics CSV export completed (async write).");
     }
     
     private static class ThroughputDataPoint {

@@ -127,6 +127,8 @@ public class Worker implements Runnable {
                     long latencyMs = now - rec.sendTimeMs;
                     String msgType = rec.messageType;
 
+                    String statusCode = isOk ? "OK" : (isError ? "ERROR" : "UNKNOWN");
+                    
                     if (isOk) {
                         // 正常业务成功
                         successCount.incrementAndGet();
@@ -138,6 +140,9 @@ public class Worker implements Runnable {
                             metrics.recordBusinessError();
                         }
                     }
+                    
+                    // Record detailed per-message metrics for CSV export
+                    metrics.recordMessageMetric(now, msgType, latencyMs, statusCode, roomId);
                 }
             }
 

@@ -1,11 +1,17 @@
 package client_part2;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -22,6 +28,9 @@ public class Metrics {
     private final LongAdder reconnectCount = new LongAdder();
     
     private final ConcurrentLinkedQueue<Long> latenciesMs = new ConcurrentLinkedQueue<>();
+    
+    // Note: Per-message metrics are now written directly to CSV file asynchronously
+    // No need to store MessageMetric objects in memory, reducing GC pressure
     
     // Use arrays instead of Map for fixed-size room IDs (1-20) to avoid hash lookups
     private final LongAdder[] successByRoom = new LongAdder[MessageGenerator.NUM_ROOMS + 1];
@@ -78,6 +87,140 @@ public class Metrics {
         } else {
             successByMessageType.computeIfAbsent(type, k -> new LongAdder()).increment();
         }
+    }
+    
+    // Asynchronous CSV writer: writes to file in background thread to avoid blocking
+    private static volatile BufferedWriter csvWriter;
+    private static volatile ExecutorService csvWriterExecutor;
+    private static final AtomicBoolean csvWriterInitialized = new AtomicBoolean(false);
+    private static final ConcurrentLinkedQueue<String> csvWriteQueue = new ConcurrentLinkedQueue<>();
+    private static final int CSV_BATCH_SIZE = 1000; // Batch size for flushing
+    
+    /**
+     * Initialize asynchronous CSV writer (called once at start).
+     */
+    public static void initializeCsvWriter() {
+        if (csvWriterInitialized.compareAndSet(false, true)) {
+            try {
+                java.io.File resultsDir = new java.io.File("results");
+                if (!resultsDir.exists()) resultsDir.mkdirs();
+                csvWriter = new BufferedWriter(new FileWriter("results/per_message_metrics.csv", false), 64 * 1024); // 64KB buffer
+                csvWriter.write("timestamp,messageType,latency,statusCode,roomId\n");
+                
+                // Start background thread for async writes
+                csvWriterExecutor = Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "csv-writer");
+                    t.setDaemon(true);
+                    return t;
+                });
+                
+                csvWriterExecutor.submit(() -> {
+                    List<String> batch = new ArrayList<>(CSV_BATCH_SIZE);
+                    boolean shutdown = false;
+                    while (!shutdown) {
+                        try {
+                            // Collect batch from queue
+                            String line;
+                            while ((line = csvWriteQueue.poll()) != null && batch.size() < CSV_BATCH_SIZE) {
+                                batch.add(line);
+                            }
+                            
+                            if (!batch.isEmpty()) {
+                                // Write batch
+                                for (String l : batch) {
+                                    csvWriter.write(l);
+                                    csvWriter.write("\n");
+                                }
+                                csvWriter.flush();
+                                batch.clear();
+                            } else if (csvWriterExecutor.isShutdown()) {
+                                // Executor shutdown and queue empty, exit
+                                shutdown = true;
+                            } else {
+                                Thread.sleep(10); // Small sleep when queue is empty
+                            }
+                        } catch (IOException e) {
+                            System.err.println("[Metrics] CSV write error: " + e.getMessage());
+                            break;
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            // Continue to flush remaining data before exiting
+                            shutdown = true;
+                        }
+                    }
+                    // Final flush of any remaining batch
+                    try {
+                        if (!batch.isEmpty() && csvWriter != null) {
+                            for (String l : batch) {
+                                csvWriter.write(l);
+                                csvWriter.write("\n");
+                            }
+                            csvWriter.flush();
+                        }
+                    } catch (IOException e) {
+                        System.err.println("[Metrics] Final CSV flush error: " + e.getMessage());
+                    }
+                    return null;
+                });
+            } catch (IOException e) {
+                System.err.println("[Metrics] Failed to initialize CSV writer: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Shutdown CSV writer and flush remaining data.
+     * Blocks until all queued data is written to file.
+     */
+    public static void shutdownCsvWriter() {
+        if (csvWriterExecutor != null && csvWriter != null) {
+            try {
+                // Wait for queue to drain (with timeout)
+                int waitCount = 0;
+                while (!csvWriteQueue.isEmpty() && waitCount < 100) {
+                    Thread.sleep(100);
+                    waitCount++;
+                }
+                
+                // Shutdown executor (interrupts writer thread)
+                csvWriterExecutor.shutdown();
+                
+                // Wait a bit more for final flush
+                Thread.sleep(200);
+                
+                // Close writer
+                csvWriter.close();
+                System.out.println("[Metrics] CSV writer shutdown complete. Queue size: " + csvWriteQueue.size());
+            } catch (IOException | InterruptedException e) {
+                System.err.println("[Metrics] Error shutting down CSV writer: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Record detailed per-message metrics for CSV export (asynchronous write).
+     * Writes to file in background thread without blocking main execution.
+     * This avoids memory allocation for MessageMetric objects and reduces GC pressure.
+     * @param timestamp Timestamp when acknowledgment received (milliseconds since epoch)
+     * @param messageType Message type (JOIN, TEXT, LEAVE)
+     * @param latency Latency in milliseconds
+     * @param statusCode Status code ("OK" or "ERROR")
+     * @param roomId Room ID (1-20)
+     */
+    public void recordMessageMetric(long timestamp, String messageType, long latency, String statusCode, int roomId) {
+        if (csvWriter == null) {
+            initializeCsvWriter();
+            if (csvWriter == null) return; // Failed to initialize, skip recording
+        }
+        
+        // Format CSV line as String and add to queue (non-blocking, no object allocation)
+        // This is much faster than creating MessageMetric objects
+        String line = timestamp + "," + 
+                     (messageType != null ? messageType : "UNKNOWN") + "," +
+                     latency + "," +
+                     (statusCode != null ? statusCode : "UNKNOWN") + "," +
+                     roomId;
+        csvWriteQueue.offer(line); // Non-blocking add to queue, background thread will write it
     }
 
     public void recordFail() {
